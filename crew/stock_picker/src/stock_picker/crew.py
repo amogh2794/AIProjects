@@ -1,197 +1,125 @@
-from typing import List
-
-from crewai import Agent, Crew, Process, Task, LLM
-from crewai.memory.short_term.short_term_memory import ShortTermMemory
-from crewai.memory.long_term.long_term_memory import LongTermMemory
-from crewai.memory.entity.entity_memory import EntityMemory
+from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
-from crewai_tools import (
-    SerperDevTool,
-    WebsiteSearchTool,
-    ScrapeWebsiteTool,
-    CodeInterpreterTool,
-)
+from crewai_tools import SerperDevTool
+from pydantic import BaseModel, Field
+from typing import List
+from .tools.push_tool import PushNotificationTool
+from crewai.memory import LongTermMemory, ShortTermMemory, EntityMemory
+from crewai.memory.storage.rag_storage import RAGStorage
+from crewai.memory.storage.ltm_sqlite_storage import LTMSQLiteStorage
 
-from .schemas import (
-    CompanyBriefList,
-    ScreenerMetricsList,
-    ValuationViewList,
-    RiskNewsItemList,
-    FinalShortlist,
-)
+class TrendingCompany(BaseModel):
+    """ A company that is in the news and attracting attention """
+    name: str = Field(description="Company name")
+    ticker: str = Field(description="Stock ticker symbol")
+    reason: str = Field(description="Reason this company is trending in the news")
 
+class TrendingCompanyList(BaseModel):
+    """ List of multiple trending companies that are in the news """
+    companies: List[TrendingCompany] = Field(description="List of companies trending in the news")
 
-# Optional: create a single search+scrape toolkit used by multiple agents
-search_tool = SerperDevTool()
-web_rag = WebsiteSearchTool()
-scraper = ScrapeWebsiteTool()
-code_tool = CodeInterpreterTool()
+class TrendingCompanyResearch(BaseModel):
+    """ Detailed research on a company """
+    name: str = Field(description="Company name")
+    market_position: str = Field(description="Current market position and competitive analysis")
+    future_outlook: str = Field(description="Future outlook and growth prospects")
+    investment_potential: str = Field(description="Investment potential and suitability for investment")
 
-# Default LLM configuration
-default_llm = LLM(model="gpt-4o-mini")
-function_llm = LLM(model="gpt-4o-mini")
-
-# Memory/embeddings configuration
-# Uses OpenAI embeddings by default; relies on `OPENAI_API_KEY` in environment.
-EMBEDDER_CONFIG = {
-    "provider": "openai",
-    "config": {
-        "model": "text-embedding-3-small",
-    },
-}
+class TrendingCompanyResearchList(BaseModel):
+    """ A list of detailed research on all the companies """
+    research_list: List[TrendingCompanyResearch] = Field(description="Comprehensive research on all trending companies")
 
 
 @CrewBase
-class StockPickerCrew:
-    """Industry‑driven stock‑picking crew"""
+class StockPicker():
+    """StockPicker crew"""
 
-    # Tell CrewAI where your YAML lives
-    agents_config = "config/agents.yaml"
-    tasks_config = "config/tasks.yaml"
-
-    # === Agents ===
-    @agent
-    def manager(self) -> Agent:
-        return Agent(
-            config=self.agents_config["manager"],  # type: ignore[index]
-            verbose=True,
-            llm=default_llm,
-        )
+    agents_config = 'config/agents.yaml'
+    tasks_config = 'config/tasks.yaml'
 
     @agent
-    def industry_mapper(self) -> Agent:
-        return Agent(
-            config=self.agents_config["industry_mapper"],  # type: ignore[index]
-            verbose=True,
-            tools=[search_tool, web_rag],
-            llm=default_llm,
-            function_calling_llm=function_llm,
-        )
+    def trending_company_finder(self) -> Agent:
+        return Agent(config=self.agents_config['trending_company_finder'],
+                     tools=[SerperDevTool()], memory=True)
+    
+    @agent
+    def financial_researcher(self) -> Agent:
+        return Agent(config=self.agents_config['financial_researcher'], 
+                     tools=[SerperDevTool()])
 
     @agent
-    def company_discovery_agent(self) -> Agent:
-        return Agent(
-            config=self.agents_config["company_discovery_agent"],  # type: ignore[index]
-            verbose=True,
-            tools=[search_tool, web_rag, scraper],
-            llm=default_llm,
-            function_calling_llm=function_llm,
-        )
-
-    @agent
-    def fundamental_screener(self) -> Agent:
-        return Agent(
-            config=self.agents_config["fundamental_screener"],  # type: ignore[index]
-            verbose=True,
-            tools=[search_tool, web_rag, scraper, code_tool],
-            llm=default_llm,
-            function_calling_llm=function_llm,
-        )
-
-    @agent
-    def valuation_analyst(self) -> Agent:
-        return Agent(
-            config=self.agents_config["valuation_analyst"],  # type: ignore[index]
-            verbose=True,
-            tools=[code_tool],
-            llm=default_llm,
-            function_calling_llm=function_llm,
-        )
-
-    @agent
-    def news_risk_analyst(self) -> Agent:
-        return Agent(
-            config=self.agents_config["news_risk_analyst"],  # type: ignore[index]
-            verbose=True,
-            tools=[search_tool, web_rag, scraper],
-            llm=default_llm,
-            function_calling_llm=function_llm,
-        )
-
-    @agent
-    def shortlist_writer(self) -> Agent:
-        return Agent(
-            config=self.agents_config["shortlist_writer"],  # type: ignore[index]
-            verbose=True,
-            llm=default_llm,
-        )
-
-    # === Tasks ===
+    def stock_picker(self) -> Agent:
+        return Agent(config=self.agents_config['stock_picker'], 
+                     tools=[PushNotificationTool()], memory=True)
+    
     @task
-    def map_industry(self) -> Task:
+    def find_trending_companies(self) -> Task:
         return Task(
-            config=self.tasks_config["map_industry"],  # type: ignore[index]
+            config=self.tasks_config['find_trending_companies'],
+            output_pydantic=TrendingCompanyList,
         )
 
     @task
-    def company_discovery(self) -> Task:
+    def research_trending_companies(self) -> Task:
         return Task(
-            config=self.tasks_config["company_discovery"],  # type: ignore[index]
-            output_json=CompanyBriefList,
+            config=self.tasks_config['research_trending_companies'],
+            output_pydantic=TrendingCompanyResearchList,
         )
 
     @task
-    def screen_fundamentals(self) -> Task:
+    def pick_best_company(self) -> Task:
         return Task(
-            config=self.tasks_config["screen_fundamentals"],  # type: ignore[index]
-            output_json=ScreenerMetricsList,
+            config=self.tasks_config['pick_best_company'],
         )
+    
 
-    @task
-    def valuation_rank(self) -> Task:
-        return Task(
-            config=self.tasks_config["valuation_rank"],  # type: ignore[index]
-            output_json=ValuationViewList,
-        )
 
-    @task
-    def news_and_risks(self) -> Task:
-        return Task(
-            config=self.tasks_config["news_and_risks"],  # type: ignore[index]
-            output_json=RiskNewsItemList,
-        )
 
-    @task
-    def compile_shortlist(self) -> Task:
-        return Task(
-            config=self.tasks_config["compile_shortlist"],  # type: ignore[index]
-            output_json=FinalShortlist,
-        )
-
-    # === Crew ===
     @crew
     def crew(self) -> Crew:
+        """Creates the StockPicker crew"""
+
+        manager = Agent(
+            config=self.agents_config['manager'],
+            allow_delegation=True
+        )
+            
         return Crew(
-            agents=[
-                self.industry_mapper(),
-                self.company_discovery_agent(),
-                self.fundamental_screener(),
-                self.valuation_analyst(),
-                self.news_risk_analyst(),
-                self.shortlist_writer(),
-            ],
-            tasks=[
-                self.map_industry(),
-                self.company_discovery(),
-                self.screen_fundamentals(),
-                self.valuation_rank(),
-                self.news_and_risks(),
-                self.compile_shortlist(),
-            ],
-            process=Process.sequential,
-            # manager_agent=self.manager(),  # kept for easy switch back to hierarchical
+            agents=self.agents,
+            tasks=self.tasks, 
+            process=Process.hierarchical,
             verbose=True,
-            planning=True,  # let CrewAI plan sub-steps per task
-            # Enable CrewAI memory and provide explicit storage locations
+            manager_agent=manager,
             memory=True,
-            embedder=EMBEDDER_CONFIG,
-            short_term_memory=ShortTermMemory(
-                crew=None,  # Crew will be set internally by CrewAI
-                embedder_config=EMBEDDER_CONFIG,
+            # Long-term memory for persistent storage across sessions
+            long_term_memory = LongTermMemory(
+                storage=LTMSQLiteStorage(
+                    db_path="./memory/long_term_memory_storage.db"
+                )
             ),
-            long_term_memory=LongTermMemory(),
-            entity_memory=EntityMemory(
-                crew=None,  # Crew will be set internally by CrewAI
-                embedder_config=EMBEDDER_CONFIG,
+            # Short-term memory for current context using RAG
+            short_term_memory = ShortTermMemory(
+                storage = RAGStorage(
+                        embedder_config={
+                            "provider": "openai",
+                            "config": {
+                                "model": 'text-embedding-3-small'
+                            }
+                        },
+                        type="short_term",
+                        path="./memory/"
+                    )
+                ),            # Entity memory for tracking key information about entities
+            entity_memory = EntityMemory(
+                storage=RAGStorage(
+                    embedder_config={
+                        "provider": "openai",
+                        "config": {
+                            "model": 'text-embedding-3-small'
+                        }
+                    },
+                    type="short_term",
+                    path="./memory/"
+                )
             ),
         )
